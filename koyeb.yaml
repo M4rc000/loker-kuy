@@ -1,0 +1,19 @@
+name: lokerkupy-backend
+service:
+  name: backend
+  instance: free
+  ports:
+    - port: 8080
+      protocol: http
+  routes:
+    - path: /
+  env:
+    - key: PORT
+      value: "8080"
+    - key: FIREBASE_DATABASE_URL
+      secret: FIREBASE_DATABASE_URL
+    - key: FIREBASE_CREDENTIALS
+      secret: FIREBASE_CREDENTIALS
+  docker:
+    dockerfile: backend/Dockerfile
+    context: .

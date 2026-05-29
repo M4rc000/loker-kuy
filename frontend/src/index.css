@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply text-slate-800 antialiased;
+  }
+
+  *::selection {
+    @apply bg-indigo-200/60 text-indigo-900;
+  }
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 rounded-full;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-slideUp {
+  animation: slideUp 0.3s ease-out;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 0.2s ease-out;
+}
+
+.job-card-enter {
+  animation: slideUp 0.3s ease-out both;
+}
+
+.job-card-enter:nth-child(1) { animation-delay: 0ms; }
+.job-card-enter:nth-child(2) { animation-delay: 50ms; }
+.job-card-enter:nth-child(3) { animation-delay: 100ms; }
+.job-card-enter:nth-child(4) { animation-delay: 150ms; }
+.job-card-enter:nth-child(5) { animation-delay: 200ms; }
+.job-card-enter:nth-child(6) { animation-delay: 250ms; }
