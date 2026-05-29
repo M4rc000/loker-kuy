@@ -10,10 +10,12 @@ service:
   env:
     - key: PORT
       value: "8080"
+    - key: CORS_ORIGIN
+      value: "https://lokerkupy.vercel.app"
     - key: FIREBASE_DATABASE_URL
       secret: FIREBASE_DATABASE_URL
-    - key: FIREBASE_CREDENTIALS
-      secret: FIREBASE_CREDENTIALS
+    - key: FIREBASE_SECRET
+      secret: FIREBASE_SECRET
   docker:
     dockerfile: backend/Dockerfile
     context: .
