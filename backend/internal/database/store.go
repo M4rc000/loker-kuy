@@ -1,9 +1,13 @@
 package database
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -11,6 +15,13 @@ import (
 	"time"
 
 	"github.com/lokerkupy/backend/internal/models"
+)
+
+var (
+	firebaseURL string
+	authSecret  string
+	useFirebase bool
+	httpClient  = &http.Client{Timeout: 30 * time.Second}
 )
 
 type MasterStore struct {
@@ -22,14 +33,64 @@ type MasterStore struct {
 
 var Store *MasterStore
 
+func firebaseAPIURL(path string) string {
+	url := fmt.Sprintf("%s/%s.json", firebaseURL, path)
+	if authSecret != "" {
+		url += fmt.Sprintf("?auth=%s", authSecret)
+	}
+	return url
+}
+
+func firebaseRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
+	var reqBody io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reqBody = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, firebaseAPIURL(path), reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("Firebase API error %d: %s", resp.StatusCode, string(respBody))
+	}
+	return respBody, nil
+}
+
 func InitMasterStore() error {
+	url := os.Getenv("FIREBASE_DATABASE_URL")
+	if url != "" {
+		firebaseURL = strings.TrimRight(url, "/")
+		authSecret = os.Getenv("FIREBASE_SECRET")
+		if authSecret == "" {
+			authSecret = os.Getenv("FIREBASE_AUTH_SECRET")
+		}
+		useFirebase = true
+	}
 	Store = &MasterStore{
 		jobs:       make(map[string]models.Job),
 		dedupIndex: make(map[string]string),
 	}
-	Store.loadFromDisk()
+	Store.load()
 	Store.loaded = true
-	fmt.Printf("Master store loaded: %d jobs\n", len(Store.jobs))
+	mode := "local JSON"
+	if useFirebase {
+		mode = "Firebase"
+	}
+	fmt.Printf("Master store loaded: %d jobs (%s)\n", len(Store.jobs), mode)
 	return nil
 }
 
@@ -163,37 +224,73 @@ func (s *MasterStore) Count() int {
 	return len(s.jobs)
 }
 
-func (s *MasterStore) persistToDisk() {
-	data := struct {
-		Jobs       map[string]models.Job `json:"jobs"`
-		DedupIndex map[string]string     `json:"dedup_index"`
-	}{
-		Jobs:       s.jobs,
-		DedupIndex: s.dedupIndex,
+func (s *MasterStore) save() {
+	if useFirebase {
+		data := struct {
+			Jobs       map[string]models.Job `json:"jobs"`
+			DedupIndex map[string]string     `json:"dedup_index"`
+		}{
+			Jobs:       s.jobs,
+			DedupIndex: s.dedupIndex,
+		}
+		_, _ = firebaseRequest(context.Background(), "PUT", "master_jobs", data)
+	} else {
+		data := struct {
+			Jobs       map[string]models.Job `json:"jobs"`
+			DedupIndex map[string]string     `json:"dedup_index"`
+		}{
+			Jobs:       s.jobs,
+			DedupIndex: s.dedupIndex,
+		}
+		b, _ := json.MarshalIndent(data, "", "  ")
+		os.MkdirAll("data", 0755)
+		os.WriteFile("data/master_jobs.json", b, 0644)
 	}
-	b, _ := json.MarshalIndent(data, "", "  ")
-	os.MkdirAll("data", 0755)
-	os.WriteFile("data/master_jobs.json", b, 0644)
 }
 
-func (s *MasterStore) loadFromDisk() {
-	os.MkdirAll("data", 0755)
-	b, err := os.ReadFile("data/master_jobs.json")
-	if err != nil {
-		return
-	}
-	var data struct {
-		Jobs       map[string]models.Job `json:"jobs"`
-		DedupIndex map[string]string     `json:"dedup_index"`
-	}
-	if err := json.Unmarshal(b, &data); err != nil {
-		return
-	}
-	if data.Jobs != nil {
-		s.jobs = data.Jobs
-	}
-	if data.DedupIndex != nil {
-		s.dedupIndex = data.DedupIndex
+func (s *MasterStore) load() {
+	if useFirebase {
+		b, err := firebaseRequest(context.Background(), "GET", "master_jobs", nil)
+		if err != nil {
+			fmt.Println("Master store: cannot load from Firebase, starting fresh:", err)
+			return
+		}
+		if string(b) == "null" {
+			return
+		}
+		var data struct {
+			Jobs       map[string]models.Job `json:"jobs"`
+			DedupIndex map[string]string     `json:"dedup_index"`
+		}
+		if err := json.Unmarshal(b, &data); err != nil {
+			fmt.Println("Master store: cannot decode Firebase data, starting fresh:", err)
+			return
+		}
+		if data.Jobs != nil {
+			s.jobs = data.Jobs
+		}
+		if data.DedupIndex != nil {
+			s.dedupIndex = data.DedupIndex
+		}
+	} else {
+		os.MkdirAll("data", 0755)
+		b, err := os.ReadFile("data/master_jobs.json")
+		if err != nil {
+			return
+		}
+		var data struct {
+			Jobs       map[string]models.Job `json:"jobs"`
+			DedupIndex map[string]string     `json:"dedup_index"`
+		}
+		if err := json.Unmarshal(b, &data); err != nil {
+			return
+		}
+		if data.Jobs != nil {
+			s.jobs = data.Jobs
+		}
+		if data.DedupIndex != nil {
+			s.dedupIndex = data.DedupIndex
+		}
 	}
 }
 
@@ -207,7 +304,7 @@ func AutoPersist(interval time.Duration) {
 				Store.mu.RUnlock()
 				if loaded {
 					Store.mu.Lock()
-					Store.persistToDisk()
+					Store.save()
 					Store.mu.Unlock()
 				}
 			}
